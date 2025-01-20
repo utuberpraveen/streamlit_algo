@@ -342,6 +342,7 @@ if st.sidebar.button("Login"):
                 if status == "SUCCESS":
                     st.success("Logged in successfully, WebSocket connection started!")
                     telegram_bot(f"Logged in success,\n\nWebSocket connection starts : {str(ctime())}")
+                    
                     start_time = int(time.time())
                     
                     #st.dataframe(df)
@@ -392,233 +393,246 @@ if st.sidebar.button("Login"):
                     columns_to_read = columns_to_read + ['remainingqty','high','stop_loss','tp1','tp2','tp3','trailing_sl','current_tp'] #,"low"]
 
                     # Start the while loop for continuous updates
+                    marketTime = datetime.now().strftime('%H:%M:%S')
+
+                     #Execute between '09:20:00' and '15:30:00'
                     while True:
-                        #print("--------------------------------Entering While scripts--------------------------------", scripts)
-                        # Extract the latest price data for all scripts in a single pass
-                        extracted_data = []
-                        print("LTP price update starts : ",str(ctime()))
-                        
-                        #st.empty()
-                        try:
-                            for script in scripts:
-                                LTPData = {
-                                    "clientcode": clientcode,
-                                    "exchange": "NSE",
-                                    "scripcode": script
-                                }
-                                try:
-                                    # Fetch quote data from the API
-                                    quote = Mofsl.GetLtp(LTPData)["data"]
-                                    # print("########### Quote#####")
-                                    # print(quote)
-                                except Exception as e:
-                                    st.error(f"Error while getting LTP etc the : {e}")
-                                
-                                # Extract relevant data
-                                scripcode = quote['scripcode']
-                                current_price = quote['ltp'] / 100  # Convert ltp to CMP
-                                high = quote['high']/100
-                                low = quote['low']/100
-                                
-                                # Append the data to the list for DataFrame construction
-                                extracted_data.append({
-                                    "nsesymboltoken": scripcode,  
-                                    "CMP": current_price, # Store directly as 'CMP'
-                                    "high": high,
-                                    #"low": low
-                                })
+                        print(f"{marketTime = }")
+                        if marketTime >=  '09:14:44' and marketTime <=  '15:35:30':
+                            #print("--------------------------------Entering While scripts--------------------------------", scripts)
+                            # Extract the latest price data for all scripts in a single pass
+                            extracted_data = []
+                            print("LTP price update starts : ",str(ctime()))
                             
-                            #print(extracted_data)
-                            print("##### extracted done####")
-                        except Exception as e :
-                            telegram_bot(f"LTP update failed : {e}")
-
-                        try:
-                            # Since we're already using 'CMP' in ltp_df, we can directly update df
-                            #df.update(ltp_df.set_index('nsesymboltoken'))  # Update df's 'CMP'
-                            #currentTime = datetime.now().strftime('%H:%M:%S')
-                            totaldf_time_holder.markdown("%s" % str(ctime()))
-                            #st.write("Last Updated Time :", ctime())
-                            for cmp in extracted_data:
-                                sCode = cmp['nsesymboltoken']
-                                sCMP = cmp['CMP']
-                                sHigh = cmp['high']
-                                #sLow = cmp['low']
-                                df.loc[df['nsesymboltoken'] == sCode, 'CMP'] = sCMP
-                                df.loc[df['nsesymboltoken'] == sCode, 'high'] = sHigh
-                                #df.loc[df['nsesymboltoken'] == sCode, 'low'] = sLow
-
-                            # Update the DataFrame in the Streamlit UI using the placeholder
-                            # print("###### final df#####")
-                            # print(df)
-                            print("Before checking : ",holding_stocks)
-
-                            df[["trailing_sl","current_tp"]] = df.apply(calculate_trailing_sl, axis=1,result_type='expand')
-                            print("Before updated ln 420") #,df.columns)
-
-                            df.to_csv("Df live.csv")
-                            total_stocks = get_total_stocks(userid,df[columns_to_read])
-                            
-                            df = pd.DataFrame(total_stocks)
-
-                            #print("Updateddf columns")
-                            #print(df.columns)
-                        
-                            holding_stocks = pd.unique(total_stocks[total_stocks['remainingqty']>0]['scripname']).tolist()
-
-                            print(f"\nTrading management stcoks : {holding_stocks}\n")
-                            
-                            if len(holding_stocks)>0 :
-
-                                
-                                def myround(x, base=1):
-                                    return base * round(x/base)
-
-                                #sell_df = df[df["scripname"].str.contains("|".join(holding_stocks))]
-                                print("Holdings")
-                                #print(df.columns)
-                                #print(df[df['remainingqty']>0])
-                                #print("Df")
-
-                                df["% up"] = ((df["CMP"]-df["buy_price"])/df["buy_price"])*100
-                                holdings_df = df[df['remainingqty']>0]
-
-                                columns_reorder = ["scripname","total_shares", "dpquantity","blockedquantity", "positionquantity", 
-                                     "buy_price", "buyavgprice", "positionbuyavg","trailing_sl", 
-                                     "current_tp", "positionsellavg","CMP","% up","high","52w_high"]
-
-
-                                total_holdings.dataframe(holdings_df[columns_reorder])
-
-                                #trailing_sl_df = total_stocks[["nsesymboltoken","scripname","remainingqty"]].copy()
-                                
-                    
-                                #sell_df = pd.merge(df, trailing_sl_df, how="inner", on=["nsesymboltoken","scripname"])
-
-                                #print("after displaying holdings: ",len(df))
-                                sell_df = df[df["scripname"].str.contains("|".join(holding_stocks))]   #holding stocks
-
-                                #sell_df.to_csv("Sell.csv")
-                                #df.to_csv("df.csv")
-
-                                print("Getting df for tp and sl")
-                                tp1_df = sell_df.query('tp1 <= CMP and remainingqty==total_shares')
-                                sell_df = sell_df.query('CMP <= trailing_sl') # or low < trailing_sl')
-
-                                #print(df["CMP"])
-
-                                sell_df =pd.concat([sell_df,tp1_df])
-
-                                #print(sell_df)
-
-                                #print(len(df))
-                                
-                                if not sell_df.empty :
-                                    sell_df["Shares_to_sell"] = sell_df.apply(lambda x : myround(x["remainingqty"] / 2) if x['total_shares'] == x['remainingqty'] and x['tp1']<=x['CMP'] else x["remainingqty"], axis=1)
-                                    if placeOrder.lower() == 'yes':
-                                        sell_df.apply(lambda x: place_order(x["scripname"],x["nsesymboltoken"], "SELL", x["Shares_to_sell"], 0 ,'MARKET'), axis=1) # 0 indicates market order/current price
-                                    sell_df.to_csv("sell.csv")
-                                    #shares_not_to_buy = shares_not_to_buy + sell_df['scripname'].unique()
-                                    selldf_placeholder.dataframe(sell_df)
-                                else:
-                                    print(f"None to sell, sold today : {shares_not_to_buy}")
-                                    selldf_placeholder.dataframe(pd.DataFrame())
-                                #    df[["trailing_sl","current_tp"]] = df.apply(calculate_trailing_sl, axis=1)
-
-                                #for stop loss hit stocks
-                                
-                                selldf_time_holder.markdown("%s" % str(ctime()))
-                                
+                            #st.empty()
+                            try:
+                                for script in scripts:
+                                    LTPData = {
+                                        "clientcode": clientcode,
+                                        "exchange": "NSE",
+                                        "scripcode": script
+                                    }
+                                    try:
+                                        # Fetch quote data from the API
+                                        quote = Mofsl.GetLtp(LTPData)["data"]
+                                        # print("########### Quote#####")
+                                        # print(quote)
+                                    except Exception as e:
+                                        st.error(f"Error while getting LTP etc the : {e}")
                                     
+                                    # Extract relevant data
+                                    scripcode = quote['scripcode']
+                                    current_price = quote['ltp'] / 100  # Convert ltp to CMP
+                                    high = quote['high']/100
+                                    low = quote['low']/100
+                                    
+                                    # Append the data to the list for DataFrame construction
+                                    extracted_data.append({
+                                        "nsesymboltoken": scripcode,  
+                                        "CMP": current_price, # Store directly as 'CMP'
+                                        "high": high,
+                                        #"low": low
+                                    })
                                 
-                            else:
-                                print("No holding section, None to sell")
-                                total_holdings.dataframe(pd.DataFrame())
-                                
-                                selldf_time_holder.markdown("%s" % str(ctime()))
-                                selldf_placeholder.dataframe(pd.DataFrame())
+                                #print(extracted_data)
+                                print("##### extracted done####")
+                            except Exception as e :
+                                telegram_bot(f"LTP update failed : {e}")
 
                             try:
-                                orderbook = pd.DataFrame(Mofsl.GetOrderBook(userid)['data'])
-                                shares_not_to_buy = orderbook[(orderbook["series"]=="EQ") & (orderbook["orderstatus"]=="Traded") & (orderbook["buyorsell"]=="SELL")]['symbol'].unique()
-                                shares_not_to_buy = [s.strip(' EQ') for s in shares_not_to_buy]
+                                # Since we're already using 'CMP' in ltp_df, we can directly update df
+                                #df.update(ltp_df.set_index('nsesymboltoken'))  # Update df's 'CMP'
+                                #currentTime = datetime.now().strftime('%H:%M:%S')
+                                totaldf_time_holder.markdown("%s" % str(ctime()))
+                                #st.write("Last Updated Time :", ctime())
+                                for cmp in extracted_data:
+                                    sCode = cmp['nsesymboltoken']
+                                    sCMP = cmp['CMP']
+                                    sHigh = cmp['high']
+                                    #sLow = cmp['low']
+                                    df.loc[df['nsesymboltoken'] == sCode, 'CMP'] = sCMP
+                                    df.loc[df['nsesymboltoken'] == sCode, 'high'] = sHigh
+                                    #df.loc[df['nsesymboltoken'] == sCode, 'low'] = sLow
 
-                                shares_bought_today = orderbook[(orderbook["series"]=="EQ") & (orderbook["orderstatus"].str.contains("|".join(["Traded", "Confirm"]))) & (orderbook["buyorsell"]=="BUY")]['symbol'].unique()
-                                shares_bought_today = [s.strip(' EQ') for s in shares_bought_today]
-                                orderbook.to_csv("OrderBook.csv")
-                                orderbook = orderbook[orderbook["orderstatus"] == "Confirm"][['symboltoken','symbol','ordertype','orderstatus','buyorsell','triggerprice','price','totalqtyremaining','orderqty','qtytradedtoday']]
-                                open_order_df_placeholder.dataframe(orderbook)
-                                open_order_df_time_holder.markdown("%s" % str(ctime()))
+                                # Update the DataFrame in the Streamlit UI using the placeholder
+                                # print("###### final df#####")
+                                # print(df)
+                                print("Before checking : ",holding_stocks)
 
+                                df[["trailing_sl","current_tp"]] = df.apply(calculate_trailing_sl, axis=1,result_type='expand')
+                                print("Before updated ln 420") #,df.columns)
 
-                                #tradebook = pd.DataFrame(Mofsl.GetTradeBook(userid)['data'])
-                                #tradebook.to_csv("Tradebook.csv")
-                            except:
-                                print("No Orders Placed today")
-                                open_order_df_placeholder.dataframe(pd.DataFrame())
-                                open_order_df_time_holder.markdown("%s" % str(ctime()))
-
-                            list_of_stocks = list(set(holding_stocks + shares_not_to_buy))
-                            print("list_of_stocks : ", list_of_stocks)
+                                df.to_csv("Df live.csv")
+                                total_stocks = get_total_stocks(userid,df[columns_to_read])
                                 
-                            buy_df = df[~df["scripname"].str.contains("|".join(list_of_stocks))]
-                            buy_df = buy_df[(buy_df["CMP"] >= buy_df["buy_price"] * 0.98 ) & (buy_df["CMP"] <= (buy_df["buy_price"]*1.005))]
-                            buy_df['Order_type'] = buy_df.apply(lambda x : 'MARKET' if x["CMP"] >= x["buy_price"] else 'LIMIT',axis = 1)
-                    
-                            buy_df["Percentage"] = (buy_df["CMP"]-buy_df["buy_price"])/100 #df.apply(lambda x: ( if x["CMP"] >= x["buy_price"] else )
-                
-                            #for new buys in stocks
-                            #st.write("Stocks getting buy signal")
+                                df = pd.DataFrame(total_stocks)
+
+                                #print("Updateddf columns")
+                                #print(df.columns)
                             
-                            if len(buy_df)>0:
-                                print("Got df for buy")
-                                buy_df.to_csv("buy.csv")
-                                buydf_placeholder.dataframe(buy_df)
-                                if placeOrder.lower() == 'yes':
-                                    buy_df.apply(lambda x: place_order(x["scripname"],x["nsesymboltoken"], "BUY", x["total_shares"], x['buy_price'] ,x['Order_type']), axis=1)
+                                holding_stocks = pd.unique(total_stocks[total_stocks['remainingqty']>0]['scripname']).tolist()
 
-                            else:
-                                print("No stocks for Buy")
-                                print(f"None to buy, bought today : {shares_bought_today}")
-                                print(f"placeOrder : {placeOrder}")
-                                if placeOrder.lower() == 'yes':
-                                    print("Will Place order")
-                                else:
-                                    print("Will not Place order")
-                                buydf_placeholder.dataframe(pd.DataFrame())
+                                print(f"\nTrading management stcoks : {holding_stocks}\n")
+                                
+                                if len(holding_stocks)>0 :
 
-                            buydf_time_holder.markdown("%s" % str(ctime()))
-                            # This will now update in place with the new 'df'
-                            
-                            #df[["trailing_sl","current_tp"]] = df.apply(calculate_trailing_sl, axis=1)
-                            #df.to_csv("after trailing sl modification.csv") #based on cmp
+                                    
+                                    def myround(x, base=1):
+                                        return base * round(x/base)
 
-                            #print(df.columns)
-                            #df = df[columns_to_read + ["remainingqty"]]
-                            #print(df.columns)
+                                    #sell_df = df[df["scripname"].str.contains("|".join(holding_stocks))]
+                                    print("Holdings")
+                                    #print(df.columns)
+                                    #print(df[df['remainingqty']>0])
+                                    #print("Df")
 
-                            #display_current_stocks = get_total_stocks(userid,df[columns_to_read])
-                            #st.write("holdings with updated stocks")
-                            #data_placeholder.dataframe(display_current_stocks)
+                                    df["% up"] = ((df["CMP"]-df["buy_price"])/df["buy_price"])*100
+                                    holdings_df = df[df['remainingqty']>0]
 
-                            
-                            #holding_stocks
-                            print("webconnection ends")
-                            end_time = int(time.time())
+                                    columns_reorder = ["scripname","total_shares", "dpquantity","blockedquantity", "positionquantity", 
+                                         "buy_price", "buyavgprice", "positionbuyavg","trailing_sl", 
+                                         "current_tp", "positionsellavg","CMP","% up","high","52w_high"]
 
-                            diff = end_time - start_time
 
-                            if diff > 1800:
-                                telegram_bot("All okay ,No issue so far")
-                                start_time = end_time
-                            else:
-                                print(f"Difference is less, {diff}")
-                            
-                        except Exception as e:
-                            st.error(f"Error while merging etc the :  \n {traceback.format_exc()}\n")
-                            telegram_bot(f"Error while merging etc the :  \n {traceback.format_exc()}\n")
-                        time.sleep(sleepTime)
+                                    total_holdings.dataframe(holdings_df[columns_reorder])
+
+                                    #trailing_sl_df = total_stocks[["nsesymboltoken","scripname","remainingqty"]].copy()
+                                    
                         
+                                    #sell_df = pd.merge(df, trailing_sl_df, how="inner", on=["nsesymboltoken","scripname"])
+
+                                    #print("after displaying holdings: ",len(df))
+                                    sell_df = df[df["scripname"].str.contains("|".join(holding_stocks))]   #holding stocks
+
+                                    #sell_df.to_csv("Sell.csv")
+                                    #df.to_csv("df.csv")
+
+                                    print("Getting df for tp and sl")
+                                    tp1_df = sell_df.query('tp1 <= CMP and remainingqty==total_shares')
+                                    sell_df = sell_df.query('CMP <= trailing_sl') # or low < trailing_sl')
+
+                                    #print(df["CMP"])
+
+                                    sell_df =pd.concat([sell_df,tp1_df])
+
+                                    #print(sell_df)
+
+                                    #print(len(df))
+                                    
+                                    if not sell_df.empty :
+                                        sell_df["Shares_to_sell"] = sell_df.apply(lambda x : myround(x["remainingqty"] / 2) if x['total_shares'] == x['remainingqty'] and x['tp1']<=x['CMP'] else x["remainingqty"], axis=1)
+                                        if placeOrder.lower() == 'yes':
+                                            sell_df.apply(lambda x: place_order(x["scripname"],x["nsesymboltoken"], "SELL", x["Shares_to_sell"], 0 ,'MARKET'), axis=1) # 0 indicates market order/current price
+                                        sell_df.to_csv("sell.csv")
+                                        #shares_not_to_buy = shares_not_to_buy + sell_df['scripname'].unique()
+                                        selldf_placeholder.dataframe(sell_df)
+                                    else:
+                                        print(f"None to sell, sold today : {shares_not_to_buy}")
+                                        selldf_placeholder.dataframe(pd.DataFrame())
+                                    #    df[["trailing_sl","current_tp"]] = df.apply(calculate_trailing_sl, axis=1)
+
+                                    #for stop loss hit stocks
+                                    
+                                    selldf_time_holder.markdown("%s" % str(ctime()))
+                                    
+                                        
+                                    
+                                else:
+                                    print("No holding section, None to sell")
+                                    total_holdings.dataframe(pd.DataFrame())
+                                    
+                                    selldf_time_holder.markdown("%s" % str(ctime()))
+                                    selldf_placeholder.dataframe(pd.DataFrame())
+
+                                try:
+                                    orderbook = pd.DataFrame(Mofsl.GetOrderBook(userid)['data'])
+                                    shares_not_to_buy = orderbook[(orderbook["series"]=="EQ") & (orderbook["orderstatus"]=="Traded") & (orderbook["buyorsell"]=="SELL")]['symbol'].unique()
+                                    shares_not_to_buy = [s.strip(' EQ') for s in shares_not_to_buy]
+
+                                    shares_bought_today = orderbook[(orderbook["series"]=="EQ") & (orderbook["orderstatus"].str.contains("|".join(["Traded", "Confirm"]))) & (orderbook["buyorsell"]=="BUY")]['symbol'].unique()
+                                    shares_bought_today = [s.strip(' EQ') for s in shares_bought_today]
+                                    orderbook.to_csv("OrderBook.csv")
+                                    orderbook = orderbook[orderbook["orderstatus"] == "Confirm"][['symboltoken','symbol','ordertype','orderstatus','buyorsell','triggerprice','price','totalqtyremaining','orderqty','qtytradedtoday']]
+                                    open_order_df_placeholder.dataframe(orderbook)
+                                    open_order_df_time_holder.markdown("%s" % str(ctime()))
+
+
+                                    #tradebook = pd.DataFrame(Mofsl.GetTradeBook(userid)['data'])
+                                    #tradebook.to_csv("Tradebook.csv")
+                                except:
+                                    print("No Orders Placed today")
+                                    open_order_df_placeholder.dataframe(pd.DataFrame())
+                                    open_order_df_time_holder.markdown("%s" % str(ctime()))
+
+                                list_of_stocks = list(set(holding_stocks + shares_not_to_buy))
+                                print("list_of_stocks : ", list_of_stocks)
+                                    
+                                buy_df = df[~df["scripname"].str.contains("|".join(list_of_stocks))]
+                                buy_df = buy_df[(buy_df["CMP"] >= buy_df["buy_price"] * 0.98 ) & (buy_df["CMP"] <= (buy_df["buy_price"]*1.005))]
+                                buy_df['Order_type'] = buy_df.apply(lambda x : 'MARKET' if x["CMP"] >= x["buy_price"] else 'LIMIT',axis = 1)
+                        
+                                buy_df["Percentage"] = (buy_df["CMP"]-buy_df["buy_price"])/100 #df.apply(lambda x: ( if x["CMP"] >= x["buy_price"] else )
+                    
+                                #for new buys in stocks
+                                #st.write("Stocks getting buy signal")
+                                
+                                if len(buy_df)>0:
+                                    print("Got df for buy")
+                                    buy_df.to_csv("buy.csv")
+                                    buydf_placeholder.dataframe(buy_df)
+                                    if placeOrder.lower() == 'yes':
+                                        buy_df.apply(lambda x: place_order(x["scripname"],x["nsesymboltoken"], "BUY", x["total_shares"], x['buy_price'] ,x['Order_type']), axis=1)
+
+                                else:
+                                    print("No stocks for Buy")
+                                    print(f"None to buy, bought today : {shares_bought_today}")
+                                    print(f"placeOrder : {placeOrder}")
+                                    if placeOrder.lower() == 'yes':
+                                        print("Will Place order")
+                                    else:
+                                        print("Will not Place order")
+                                    buydf_placeholder.dataframe(pd.DataFrame())
+
+                                buydf_time_holder.markdown("%s" % str(ctime()))
+                                # This will now update in place with the new 'df'
+                                
+                                #df[["trailing_sl","current_tp"]] = df.apply(calculate_trailing_sl, axis=1)
+                                #df.to_csv("after trailing sl modification.csv") #based on cmp
+
+                                #print(df.columns)
+                                #df = df[columns_to_read + ["remainingqty"]]
+                                #print(df.columns)
+
+                                #display_current_stocks = get_total_stocks(userid,df[columns_to_read])
+                                #st.write("holdings with updated stocks")
+                                #data_placeholder.dataframe(display_current_stocks)
+
+                                
+                                #holding_stocks
+                                print("webconnection ends")
+                                end_time = int(time.time())
+
+                                diff = end_time - start_time
+
+                                if diff > 1800:
+                                    telegram_bot("All okay ,No issue so far")
+                                    start_time = end_time
+                                else:
+                                    print(f"Difference is less, {diff}")
+                                
+                            except Exception as e:
+                                st.error(f"Error while merging etc the :  \n {traceback.format_exc()}\n")
+                                telegram_bot(f"Error while merging etc the :  \n {traceback.format_exc()}\n")
+                            time.sleep(sleepTime)
+                            marketTime = datetime.now().strftime('%H:%M:%S')
+                        else:
+                            print(f"market not active {marketTime = }")
+                            if marketTime <=  '09:14:20':
+                                time.sleep(30)
+                            else:
+                                time.sleep(5)
+                            marketTime = datetime.now().strftime('%H:%M:%S')
+                            
             except Exception as e:
                 st.error(f"Error starting the WebSocket connection:  \n {traceback.format_exc()}\n")
                 telegram_bot(f"Error starting the WebSocket connection:  \n {traceback.format_exc()}\n")
