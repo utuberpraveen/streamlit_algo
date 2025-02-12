@@ -92,6 +92,30 @@ def send_api_request(url, payload, headers):
 # API Endpoints
 # ---------------------------
 
+@app.route('/proxy', methods=['POST'])
+def proxy():
+    # Read the JSON payload from the incoming request.
+    data = request.get_json(force=True)
+    
+    # Modify headers; update User-Agent and any other headers required.
+    headers = {
+        "User-Agent": "MOSL/V.1.1.0",
+    }
+    
+    # Forward the request to the broker's API.
+    try:
+        broker_response = requests.post("https://openapi.motilaloswal.com//rest/login/v4/authdirectapi", data=json.dumps(payload), headers=headers)
+    except Exception as e:
+        return Response(str(e), status=500)
+    
+    # Return the broker's response to the caller.
+    return Response(
+        broker_response.content,
+        status=broker_response.status_code,
+        mimetype=broker_response.headers.get("Content-Type", "application/json")
+    )
+
+
 @app.route("/api/login", methods=["POST"])
 def login():
     """
