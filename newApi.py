@@ -1,143 +1,187 @@
-from flask import Flask, request, jsonify
+import json
 import requests
+from requests import get
+import urllib3
 import hashlib
-import os
+import pyotp
+from flask import Flask, request, jsonify, session,send_from_directory
+from flask_cors import CORS
+
+# Disable SSL warnings (use verify=True in production)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
+app.secret_key = "your_secret_key_here"  # Replace with a strong secret key
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# API Endpoints
-MOTILAL_LOGIN_URL = "https://openapi.motilaloswal.com/rest/login/v4/authdirectapi"
-GET_HOLDING_URL = "https://openapi.motilaloswal.com/rest/report/v1/getdpholding"
+# Base URL for the Motilal Oswal API endpoints
+API_BASE_URL = "https://openapi.motilaloswal.com"
 
-# Default Static Headers (these will be extended per request)
-DEFAULT_HEADERS = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-    'User-Agent': 'MOSL/V.1.1.0',  # Mandatory hardcoded value
-    'macaddress': 'b3:f6:ac:cf:be:6e',
-    'clientlocalip': '127.0.1.1',
-    'sourceid': 'WEB',
-    'clientpublicip': '188.245.169.253',
-    'osname': 'Linux',
-    'osversion': '10.0.19044',
-    'installedappid': 'a5ea3052-8fbc-11ef-bd8a-b3f6accfbe6e',
-    'devicemodel': 'vServer',
-    'manufacturer': 'Hetzner',
-    'productname': 'Investor',
-    'productversion': '1',
-    'latitude': '50.4779',
-    'longitude': '12.3713',
-    'sdkversion': 'Python 2.1',
-    'browsername': 'Chrome',
-    'browserversion': '100'
-}
+# ---------------------------
+# Helper Functions
+# ---------------------------
 
-def build_headers(api_key, vendorinfo="", auth_token=""):
+def get_url(api_path):
     """
-    Construct headers dynamically for API calls.
-    - `api_key` (str): The user's API key (required).
-    - `vendorinfo` (str): Vendor info if applicable (optional).
-    - `auth_token` (str): If provided, will be included in `Authorization`.
+    Returns the complete URL for the given API path based on the base URL.
     """
-    headers = DEFAULT_HEADERS.copy()
-    headers['apikey'] = api_key
-    headers['vendorinfo'] = vendorinfo  # May be empty for some API calls
-    if auth_token:
-        headers['Authorization'] = auth_token  # Used for authenticated calls
+    base_url = "https://openapi.motilaloswal.com/"
+    endpoints = {
+        "Login": "/rest/login/v4/authdirectapi",
+        "Logout": "/rest/login/v1/logout",
+        "GetProfile": "/rest/login/v1/getprofile",
+        "OrderBook": "/rest/book/v1/getorderbook",
+        "TradeBook": "/rest/book/v1/gettradebook",
+        "GetPosition": "/rest/book/v1/getposition",
+        "DPHolding": "/rest/report/v1/getdpholding",
+        "PlaceOrder": "/rest/trans/v1/placeorder",
+        "ModifyOrder": "/rest/trans/v2/modifyorder",
+        "CancelOrder": "/rest/trans/v1/cancelorder",
+        "ltadata": "/rest/report/v1/getltpdata",
+        # Add other endpoints as needed...
+    }
+    return base_url + endpoints.get(api_path, "")
+
+def build_headers(api_key, api_secret, auth_token=None, vendorinfo="", client_info={}):
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": auth_token if auth_token else "",
+        "User-Agent": "MOSL/V.1.1.0",
+        "apikey": api_key,
+        "apisecretkey": api_secret,
+        "macaddress": "00:50:56:BD:F4:0B",
+        "clientlocalip": "127.0.0.1",
+        "sourceid": "WEB",
+        "clientpublicip": "1.2.3.4",
+        "vendorinfo": vendorinfo,
+        "osname": "Windows",
+        "osversion": "10",
+        "installedappid": "123",
+        "devicemodel": "vServer",
+        "manufacturer": "Generic",
+        "productname": "TraderApp",
+        "productversion": "1",
+        "latitude": "26.923974",
+        "longitude": "75.826603",
+        "sdkversion": ""
+    }
+    if client_info.get("sourceid", "").upper() == "WEB":
+        headers["browsername"] = client_info.get("browsername", "Chrome")
+        headers["browserversion"] = client_info.get("browserversion", "10")
     return headers
 
-@app.route('/login', methods=['POST'])
+def send_api_request(url, payload, headers):
+    try:
+        print("URL", url)
+        print("playload",payload)
+        print("headers",headers)
+        #response = requests.post(url, headers=headers, json=payload, verify=False, timeout=15)
+        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        print("response",response)
+        if response.status_code == 200:
+            json_data = response.json()
+            print("response JSON:", json_data)  # Print the JSON content
+            return json_data
+        else:
+            return {"error": response.status_code, "message": response.text}
+    except Exception as e:
+        return {"error": "Request Failed", "message": str(e)}
+
+# ---------------------------
+# API Endpoints
+# ---------------------------
+
+@app.route("/api/login", methods=["POST"])
 def login():
     """
-    Login to Motilal Oswal API.
-    Expected JSON payload:
-    {
-        "userid": "user123",
-        "password": "password",
-        "2FA": "20/04/1989",
-        "totp": "",
-        "apikey": "your_api_key",
-        "vendorinfo": "BGRKA1202"
-    }
+    Login endpoint.
+    Expects JSON with: userid, password, appkey, 2FA, totp (optional), and client_info.
+    The password is hashed using SHA-256 after concatenating with the appkey.
     """
-    data = request.get_json()
-    if not data:
-        return jsonify({"status": "FAILURE", "message": "Missing JSON payload"}), 400
-
-    userid = data.get("userid")
-    raw_password = data.get("password")
-    two_fa = data.get("2FA")
-    totp = data.get("totp", "")
-    user_apikey = data.get("apikey")
-    vendorinfo = data.get("vendorinfo", "")
-
-    if not userid or not raw_password or not two_fa or not user_apikey:
-        return jsonify({"status": "FAILURE", "message": "Missing required parameters"}), 400
-
-    # Create hashed password: SHA-256(raw_password + APIKey)
-    hashed_password = hashlib.sha256((raw_password + user_apikey).encode()).hexdigest()
-
-    # Build login payload
+    data = request.json
+    user_id = data.get("userid")
+    password = data.get("password")
+    appkey = data.get("appkey")
+    twofa = data.get("2FA")
+    totp_from_request = data.get("totp")
+    
+    # Auto-generate TOTP if not provided. Replace 'YOUR_TOTP_SECRET' with your actual secret.
+    totp_secret = "VXOULXLW5YT6O2ZO4MXRVWG4RCAUEFLH"
+    totp = totp_from_request #if totp_from_request else pyotp.TOTP(totp_secret).now()
+    
+     # Concatenate password and appkey, then hash using SHA-256.
+    combined = password + appkey
+    hashed_password = hashlib.sha256(combined.encode("utf-8")).hexdigest()
+    
+    login_url = get_url("Login")
     payload = {
-        "userid": userid,
+        "userid": user_id,
         "password": hashed_password,
-        "2FA": two_fa
+        "2FA": twofa,
+        "totp": totp
     }
-    if totp:
-        payload["totp"] = totp
+    
+    # For headers, use appkey as API key; use a default API secret if needed.
+    # The vendorinfo is set to the user_id (only for login as per your flow).
+    api_key = appkey
+    api_secret = ""  # Use your default API secret or leave as an empty string if not required.
+    client_info = data.get("client_info", {"sourceid": "WEB"})
+    headers = build_headers(api_key, api_secret, auth_token=None, vendorinfo=user_id, client_info=client_info)
+    
+    response = send_api_request(login_url, payload, headers)
+    if "authtoken" in response:
+        session["authtoken"] = response["authtoken"]
+        return jsonify({"message": "Login successful", "authtoken": response["authtoken"]})
+    else:
+        return jsonify({"error": "Login failed", "details": response})
 
-    # Build headers dynamically
-    headers = build_headers(user_apikey, vendorinfo)
+@app.route("/api/get-ltp", methods=["POST"])
+def get_ltp():
+    if "authtoken" not in session:
+        return jsonify({"error": "Unauthorized", "message": "Please login first."}), 401
 
-    try:
-        # Send API request to Motilal Oswal
-        response = requests.post(MOTILAL_LOGIN_URL, json=payload, headers=headers)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        return jsonify({"status": "FAILURE", "message": str(e)}), 500
+    data = request.json
+    symbol = data.get("symbol")
+    # Use your configured API key/secret here
+    api_key = "your_api_key"
+    api_secret = "your_api_secret"
+    ltp_url = f"{API_BASE_URL}/getLTP"  # Replace with the actual endpoint
 
-    return jsonify(response.json()), response.status_code
+    client_info = data.get("client_info", {"sourceid": "WEB"})
+    headers = build_headers(api_key, api_secret, session["authtoken"], vendorinfo="", client_info=client_info)
+    payload = {"symbol": symbol}
+    response = send_api_request(ltp_url, payload, headers)
+    return jsonify(response)
 
-@app.route('/get_holding', methods=['POST'])
-def get_holding():
-    """
-    Fetch user holdings from Motilal Oswal API.
-    Expected JSON payload:
-    {
-        "clientcode": "client123",
-        "auth_token": "token_received_from_login",
-        "apikey": "your_api_key",
-        "vendorinfo": ""
-    }
-    """
-    data = request.get_json()
-    if not data:
-        return jsonify({"status": "FAILURE", "message": "Missing JSON payload"}), 400
+@app.route("/api/place-order", methods=["POST"])
+def place_order():
+    if "authtoken" not in session:
+        return jsonify({"error": "Unauthorized", "message": "Please login first."}), 401
 
-    clientcode = data.get("clientcode")
-    auth_token = data.get("auth_token")
-    user_apikey = data.get("apikey")
-    vendorinfo = data.get("vendorinfo", "")
+    data = request.json
+    symbol = data.get("symbol")
+    quantity = data.get("quantity")
+    price = data.get("price")
+    api_key = "your_api_key"
+    api_secret = "your_api_secret"
+    order_url = f"{API_BASE_URL}/placeOrder"  # Replace with the actual order endpoint
 
-    if not clientcode or not auth_token or not user_apikey:
-        return jsonify({"status": "FAILURE", "message": "Missing required parameters"}), 400
+    client_info = data.get("client_info", {"sourceid": "WEB"})
+    headers = build_headers(api_key, api_secret, session["authtoken"], vendorinfo="", client_info=client_info)
+    payload = {"symbol": symbol, "action": "BUY", "quantity": quantity, "price": price}
+    response = send_api_request(order_url, payload, headers)
+    return jsonify(response)
 
-    # Build headers with authentication token
-    headers = build_headers(user_apikey, vendorinfo, auth_token)
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    session.pop("authtoken", None)
+    return jsonify({"message": "Logged out successfully"})
 
-    # Build payload for holdings request
-    payload = {
-        "clientcode": clientcode
-    }
+@app.route("/")
+def index():
+    # Serve test.html from the 'static' folder
+    return send_from_directory("static", "test.html")
 
-    try:
-        # Send API request to get holdings
-        response = requests.post(GET_HOLDING_URL, json=payload, headers=headers)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        return jsonify({"status": "FAILURE", "message": str(e)}), 500
-
-    return jsonify(response.json()), response.status_code
-
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', debug=True)
