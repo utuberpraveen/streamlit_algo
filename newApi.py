@@ -6,6 +6,8 @@ import hashlib
 import pyotp
 from flask import Flask, request, jsonify, session,send_from_directory
 from flask_cors import CORS
+from MOFSLOPENAPI import MOFSLOPENAPI
+
 
 # Disable SSL warnings (use verify=True in production)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -25,7 +27,7 @@ def get_url(api_path):
     """
     Returns the complete URL for the given API path based on the base URL.
     """
-    base_url = "https://openapi.motilaloswal.com/"
+    base_url = "https://openapi.motilaloswal.com"
     endpoints = {
         "Login": "/rest/login/v4/authdirectapi",
         "Logout": "/rest/login/v1/logout",
@@ -92,30 +94,6 @@ def send_api_request(url, payload, headers):
 # API Endpoints
 # ---------------------------
 
-@app.route('/proxy', methods=['POST'])
-def proxy():
-    # Read the JSON payload from the incoming request.
-    data = request.get_json(force=True)
-    
-    # Modify headers; update User-Agent and any other headers required.
-    headers = {
-        "User-Agent": "MOSL/V.1.1.0",
-    }
-    
-    # Forward the request to the broker's API.
-    try:
-        broker_response = requests.post("https://openapi.motilaloswal.com//rest/login/v4/authdirectapi", data=json.dumps(payload), headers=headers)
-    except Exception as e:
-        return Response(str(e), status=500)
-    
-    # Return the broker's response to the caller.
-    return Response(
-        broker_response.content,
-        status=broker_response.status_code,
-        mimetype=broker_response.headers.get("Content-Type", "application/json")
-    )
-
-
 @app.route("/api/login", methods=["POST"])
 def login():
     """
@@ -132,7 +110,7 @@ def login():
     
     # Auto-generate TOTP if not provided. Replace 'YOUR_TOTP_SECRET' with your actual secret.
     totp_secret = "VXOULXLW5YT6O2ZO4MXRVWG4RCAUEFLH"
-    totp = totp_from_request #if totp_from_request else pyotp.TOTP(totp_secret).now()
+    totp = totp_from_request if totp_from_request else pyotp.TOTP(totp_secret).now()
     
      # Concatenate password and appkey, then hash using SHA-256.
     combined = password + appkey
@@ -159,6 +137,53 @@ def login():
         return jsonify({"message": "Login successful", "authtoken": response["authtoken"]})
     else:
         return jsonify({"error": "Login failed", "details": response})
+
+@app.route("/api/loginmosl", methods=["POST"])
+def loginmosl():
+    """
+    Login endpoint.
+    Expects JSON with: userid, password, appkey, 2FA, totp (optional), and client_info.
+    The password is hashed using SHA-256 after concatenating with the appkey.
+    """
+    
+    data = request.json
+    user_id = data.get("userid")
+    password = data.get("password")
+    appkey = data.get("appkey")
+    twofa = data.get("2FA")
+    totp_from_request = data.get("totp")
+
+    Mofsl = MOFSLOPENAPI(
+    f_apikey = appkey, #"3x5BxErcP7Ks13Rx",
+    #f_apikey=app_key,
+    f_Base_Url="https://openapi.motilaloswal.com",  # or UAT URL
+    #   f_Base_Url=base_url,  # or UAT URL
+    f_clientcode= user_id,#"BGRKA1202",
+    f_strSourceID="Web",  # Assuming it's a web environment
+    f_browsername="Chrome",
+    f_browserversion="91.0"
+)
+    
+    # Auto-generate TOTP if not provided. Replace 'YOUR_TOTP_SECRET' with your actual secret.
+    totp_secret = "VXOULXLW5YT6O2ZO4MXRVWG4RCAUEFLH"
+    totp = totp_from_request if totp_from_request else pyotp.TOTP(totp_secret).now()
+    
+    try:
+ 
+        login_message = Mofsl.login(user_id, password, twofa, totp, user_id)
+        status = login_message['status']
+    
+
+        if status == "SUCCESS":
+            print("\n\nWebSocket connection starts : ")
+            #st.write("Logged in successfully, WebSocket connection started!")
+
+            session["authtoken"] = login_message["authtoken"]
+            return jsonify({"message": "Login successful", "authtoken": login_message["authtoken"]})
+        else:
+            return jsonify({"error": "Login failed", "details": login_message})
+    except Exception as e:
+        return jsonify({"error": "Login Error", "details": str(e)})
 
 @app.route("/api/get-ltp", methods=["POST"])
 def get_ltp():
