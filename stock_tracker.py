@@ -279,12 +279,11 @@ def old_sl():
                                                                             (x["tp1"] if (x["CMP"]>=x["tp2"] or x["tp2"] <= x["high"]) and x["CMP"] < x["tp3"] else
                                                                               (x["buy_price"] if (x["CMP"]>=x["tp1"] or x["tp1"] <= x["high"]) and x["CMP"] < x["tp2"]  else
                                                                                x["tp2"])), axis=1)
-
 def telegram_bot(message):
     print(message)
     bot_token="8130189298:AAF9plnRt_LSf92CsTRWJk0xoWPZZDL0yng"
     chatID= -1002245043401 #private telegram bot channel
-    apiURL=f'https://api.telegram.org/bot{bot_token}/sendmessage'
+    apiURL = f'https://api.telegram.org/bot{bot_token}/sendmessage'
     #self.print_output(f'apiURL : {apiURL} message : {message}')
     
     try:
