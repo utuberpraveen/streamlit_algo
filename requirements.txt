@@ -17,6 +17,7 @@ et_xmlfile
 Flask
 Flask-Dance
 Flask-Login
+flask-cors
 Flask-Migrate
 Flask-SQLAlchemy
 frozendict
