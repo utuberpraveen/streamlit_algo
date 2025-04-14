@@ -237,7 +237,7 @@ def GetInstalledAppid():
 def GetDeviceModel():
     try:   
         #devicemodel = objsystem.Model  
-        devicemodel = get_device_model()   
+        devicemodel = "vServer" #get_device_model()   
         return devicemodel
     except Exception as e:
         print(e)
